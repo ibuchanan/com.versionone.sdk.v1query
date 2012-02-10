@@ -1,0 +1,30 @@
+## Temp Files##
+*.tmp
+*.swp
+*.bak
+~$*
+[Tt]humbs.db
+*.DS_Store
+*~.nib
+
+## Temp Folders ##
+tmp/**
+tmp/**/*
+
+## Eclipse Artifacts ##
+local.properties
+.metadata
+.settings/
+.loadpath
+.buildpath
+*.launch
+
+## Generated Files ##
+*.class 
+**/bin/**
+**/src-gen/**
+**/xtend-gen/**
+*_gen
+ 
+# External tool builders
+.externalToolBuilders/

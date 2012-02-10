@@ -1,0 +1,421 @@
+grammar com.versionone.sdk.v1query.Query hidden (ML_COMMENT)
+import "http://www.eclipse.org/emf/2002/Ecore" as ecore
+
+generate query "http://www.versionone.com/sdk/v1query/Query"
+
+/*************
+ * Productions
+ */
+
+/*
+ * This document will consist of a list of URLs that match the VersionOne Core 
+ * API Query Syntax for rest-1.v1
+ */
+Model:
+	urls += Url*;
+
+/*
+ * All VersionOne Core API Queries match general URI syntax, except they do not 
+ * have fragments. Even URLs that do not have a querypart are considered Core 
+ * API Queries. 
+ */
+Url:
+	// scheme for all VersionOne Core API Queries is either http or https
+	scheme=SchemeType ':' 
+    // hierarchicalpart of the Core API follows a specific pattern:
+    // //host/instance/rest-1.v1/querytype/assettype/assetid/attribute
+	hierarchicalpart=ResourcePath
+	// optional querypart contains parameters to specify the returned assets
+	('?' querypart=Query)?
+	WS;
+
+/*
+ * The ResourcePath of the Core API follows a specific pattern:
+ * //host/instance/rest-1.v1/querytype/assettype/assetid/attribute
+ * 
+ * assetid and attribute are optional
+ */
+ResourcePath:
+	'//' host=Host				// typical internet host, as address or DNS name 
+	'/' instance=Instance		// path to the VersionOne application instance
+	'/' 'rest-1.v1'				// rest-1.v1 is the data query part of the API
+	'/' querytype=QueryType		// type of query to perform
+	'/' assetpath=AssetPath 	// type of assets, a specific asset, or an attribute
+	;
+
+/*
+ * Actual business objects in VersionOne are assets, which are instances of 
+ * concrete asset types. Each asset is uniquely identified by its asset type and 
+ * an integer. This is not the same as the Number attribute found on some, but 
+ * not all assets. Although the Number attribute indicates type and has a unique 
+ * integer, this is not the same as an asset's ID. 
+ * 
+ * As data changes in VersionOne, a history is maintained. Every change to every 
+ * asset is journaled within the system, and assigned a 
+ * chronologically-increasing integer called a moment. A past version of an 
+ * asset is uniquely identified by its asset type, ID, and Moment. A past 
+ * version of a relation attribute will refer to the past version of its target 
+ * asset.
+ * 
+ * For example, the following is a URL for a story "B-01001":
+ * https://www14.v1host.com/v1sdktesting/rest-1.v1/Data/Story/1055
+ * 
+ * And the following is a URL for the first set of data when story "B-01001" 
+ * was added to the system: 
+ * https://www14.v1host.com/v1sdktesting/rest-1.v1/Data/Story/1055/1060
+ * 
+ * When assets are referenced in the URL, the separator is "/" as shown in the 
+ * AssetPath production. When assets are referenced in the Query part, the 
+ * separator is ":" as shown in the AssetOid.
+ */
+AssetPath:
+	assettype=AssetType 			// asset types to return
+	(
+		'/' id=INT 					// optional ID to return a specific asset
+		('/' moment=INT)? 			// optional Moment to return an asset at a 
+										// specific moment
+		('/' attribute=Attribute)? 	// optional Attribute to return only a 
+										// specific attribute on a specific asset
+	)?
+	;
+
+AssetOid:
+	assettype=AssetType 
+	':' id=INT 
+	(':' moment=INT)?
+	;
+
+/*
+ * Attributes describe the properties that make up each asset type. An attribute 
+ * defines the type of its value, whether it is required and/or read-only, and 
+ * many other qualities. Attribute definitions are identified by a name that is 
+ * unique within its asset type. The dot operator "." is used to reference an 
+ * attribute. For example, to get the parent Name of a Category on a Story:
+ * https://www14.v1host.com/v1sdktesting/rest-1.v1/Data/Story/1055/Category.Name
+ * 
+ * Attributes are defined as either scalars or relations to other assets. 
+ * Further, relation attributes can be either single-value or multi-value. For 
+ * example, the Estimate attribute on the Workitem asset type is a 
+ * scalar (specifically, a floating-point number). The Workitem.Scope attribute 
+ * is a single-value relation to a Scope asset. The complementary relationship, 
+ * Scope.Workitems is a multi-value relation to Workitem assets.
+ * 
+ * The Aggregate poration of an attribute can be used to roll-up a set of values 
+ * to a single value. For example, to obtain the total number of Workitem assets 
+ * that belog to Scope with ID 0:
+ * https://www14.v1host.com/v1sdktesting/rest-1.v1/Data/Scope/0/Workitems.@Count
+ */
+Attribute:
+	attrSelector=AttributeSelector	// a specific attribute
+	('.' '@' aggregate=AggregateType)?	// optional aggregation of attribute values
+	;
+
+/*
+ * An attribute can be selected by using dot notation:
+ * Scope.Estimate
+ */
+AttributeSelector:
+	terms += AttributeSelectorTerm
+	('.' terms += AttributeSelectorTerm)*
+	;
+
+/*
+ * In context of selecting an attribute, a term may need to be downcast to a
+ * more specific type so a child attribute is available. A filter may also be 
+ * applied to reduce the set of returned assets.
+ */
+AttributeSelectorTerm:
+	attrname=V1Name					// attribute name
+	(':' downcast=AssetType)?		// optional downcast to subtype
+	('[' filter=FilterTerm ']')?	// optional filter on values
+	;
+
+/*
+ * The Query (part) is a &-delimited string of parameters:
+ * deleted=1&sel=Name
+ */
+Query:
+	parameters += QueryParameter
+	('&' parameters += QueryParameter)*
+	;
+
+QueryParameter:
+	Select 		// Select
+	| Where 	// Where
+	| Sort 		// Sort
+	| Page 		// Page
+	| Find 		// Find
+	| FindIn 	// FindIn
+	| Operation // Operation
+	| AsOf 		// AsOf
+	| With		// With
+	| Context 	// Context
+	| Deleted	// Deleted
+	;
+
+/*
+ * Select which attributes are returned in the results. Attribute references are 
+ * comma separated:
+ * sel=Name,Number
+ */
+Select:
+	'sel' '=' 
+	terms += Attribute
+	(',' terms += Attribute)*
+	;
+
+/*
+ * Filter.
+ */
+Where:
+	'where' '=' 
+	FilterExpression
+	;
+
+/*
+ * Sort on particular attributes. Attribute references are comma separated:
+ * sort=Estimate,Name
+ */
+Sort:
+	'sort' '='
+	terms += SortTerm
+	(',' terms += SortTerm)*
+	;
+
+/*
+ * Each sort term has an optional sort order. Use + for ascending and - for 
+ * descending. If no order operator is supplied, ascending (+) is assumed.
+ */
+SortTerm:
+	(operator=('+' | '-'))? 
+	attribute=Attribute
+	;
+
+/*
+ * Provide results in pages. The size specifies the number of assets to return 
+ * per page. The start specifies the number of assets to skip. Therefore, the 
+ * start value should increment by the page size. The following would return the 
+ * 2nd page of results: 
+ * page=10,10
+ */
+Page:
+	'page' '=' size=INT ',' start=INT;
+
+/*
+ * Find a value in an attribute.
+ */
+Find:
+	'find' '=' term=FindString;
+
+/*
+ * Used with the Find parameter to specify which attributes to search. Attribute 
+ * references are comma separated:
+ * findin=Name,Description
+ */
+FindIn:
+	'findin' '=' 
+	terms += Attribute
+	(',' terms += Attribute)*
+	;
+
+Operation:
+	'op' '=' term=OperationType;
+	
+AsOf:
+	'asof' '=' term=Date;
+
+With:
+	'with' '=' 
+	terms += WithTerm
+	('|' terms += WithTerm)*
+	;
+
+WithTerm:
+	var=Variable '=' 
+	values += ValueString 
+	(',' values += ValueString)*
+	;
+
+Variable:
+	'$' VarName
+	;
+
+Context:
+	'ctx' '=' token=AssetOid;
+
+Deleted:
+	{Deleted}
+	'deleted' '=' '1';
+	
+/*******************
+ * Where Productions
+ */
+
+FilterExpression:
+	terms += FilterTerm
+	(terms += RightTerm)*
+	;
+
+FilterTerm:
+	GroupTerm | AttributeFilterTerm
+	;
+
+GroupTerm:
+	'(' FilterExpression ')';
+
+AttributeFilterTerm:
+	(exists=('+' | '-'))?
+	attr=Attribute
+	(comparison = ComparisonFilterTerm)?
+	;
+
+ComparisonFilterTerm:
+	operator=ComparisonOperatorType 
+	value=(STRING | Variable);
+
+RightTerm:
+	AndRightTerm | OrRightTerm
+	;
+
+AndRightTerm:
+	';' right=FilterTerm;
+
+OrRightTerm:
+	'|' right=FilterTerm;
+
+ComparisonOperatorType:
+	'=' 
+	| '!=' 
+	| '<' 
+	| '>' 
+	| '<=' 
+	| '>='
+	;
+
+/*************
+ * Parse Rules
+ */
+
+/*
+ * All VersionOne Core API Queries happen over HTTP (with or without SSL)
+ */
+SchemeType:
+	'http' | 'https'
+	;
+
+/*
+ * The QueryType in the HierarchicalPart must be one of the following. Although 
+ * not specified here, the Core API is not case sensitive.
+ */
+QueryType:
+	"Data"		// returns current attribute values
+	| "Hist"	// returns attribute values from all moments (changes)
+	| "New"		// returns an XML template for constructing a POST data envelope
+	;
+
+/*
+ * Asset types describe the "classes" of business data available. Asset types 
+ * form an inheritance hierarchy, such that each asset type inherits attribute 
+ * definitions, operations, and rules from its parent asset type. Those asset 
+ * types at the leaves of this hierarchy are concrete, whereas asset types with 
+ * children asset types are abstract. Assets are all instances of concrete asset 
+ * types. For example, Story and Defect are concrete asset types. Workitem is an 
+ * abstract asset type, from which Story and Defect are derived.
+ * 
+ * Asset types are identified by unique names which can be obtained from 
+ * the VersionOne Meta API. For an example of meta from the latest release, see:
+ * https://www14.v1host.com/v1sdktesting/meta.v1?xsl=api.xsl
+ */	
+AssetType:
+	V1Name;
+
+/*
+ * An Aggregate is a simple mathematical function that returns a single value 
+ * from the selected attribute values. For example:
+ * Workitems.Estimate@Sum
+ */
+AggregateType:
+	"Sum"       // Sum the returned values
+	| "Count"   // Count the returned assets
+	| "MinDate" // MinDate find the oldest date from the returned values
+	| "MaxDate" // MaxDate find the newest date from the returned values
+	;
+
+
+OperationType:
+	'Delete' 		// Delete
+	| 'Inactivate' 	// Inactivate
+	| 'Reactivate' 	// Reactivate
+	| 'Activate'	// Activate
+	;
+
+Host:
+	DnsName | Ip4Address
+	;
+
+Ip4Address:
+	INT '.' INT '.' INT '.' INT
+	;
+
+Instance:
+	V1Name;
+
+DnsName:
+	NAME ('.' NAME)*
+	;
+
+ValueString:
+	AssetOid
+	| string=NAME
+	;
+
+FindString:
+	NAME;
+
+V1Name:
+	NAME;
+
+VarName:
+	NAME;
+
+/*
+ * Date follows the form:
+ * 2005-08-03T17:30:00.00 
+ * The NAME terminal is a hack.
+ */
+Date:
+	INT '-' INT '-' INT NAME ':' INT ':' INT '.' INT
+	;
+
+/***********
+ * Terminals
+ */
+ 
+/*
+ * These terminals aproximate the VersionOne Core API but do not match the 
+ * internals. Please refer to the Parse Rule wrappers for specification.
+ */
+
+/*
+terminal URLSTRING:
+	(
+		!(
+			' ' | '\t' | '\r' | '\n' // No whitespace
+			| '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'  
+			| '&' | '#'
+			| ',' // No commas
+		)
+	)+;
+*/
+terminal NAME:
+	('a'..'z'|'A'..'Z')('a'..'z'|'A'..'Z'|'-'|'_'|'0'..'9')*;
+terminal INT returns ecore::EInt: 
+	('0'..'9')+;
+terminal STRING: 
+	"'" ( '\\'('b'|'t'|'n'|'f'|'r'|'u'|'"'|"'"|'\\') | !('\\'|"'") )* "'"; 
+terminal ML_COMMENT: 
+	'/*' -> '*/';
+terminal WS: 
+	(' '|'\t'|'\r'|'\n')+;
+terminal ANY_OTHER: 
+	.; 
